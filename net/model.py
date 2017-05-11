@@ -62,22 +62,22 @@ class CRNNNet(object):
             self.params = CRNNNet.default_params
 
     # ======================================================================= #
-    def net(self, inputs,is_test = False,width = None):
+    def net(self, inputs,width = None):
         """rcnn  network definition.
         """
-        def BLSTM(inputs,num_hidden,num_layers,seq_len,num_classes,reuse=None):
+        def BLSTM(inputs,num_hidden,num_layers,seq_len,num_classes):
             # Defining the cell
             # Can be:
             #   tf.nn.rnn_cell.RNNCell
             #   tf.nn.rnn_cell.GRUCell
-            # cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_hidden, state_is_tuple=True)
+            cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_hidden, state_is_tuple=True,reuse = self.params.reuse)
 
             # Stacking rnn cells
-            stack = tf.contrib.rnn.core_rnn_cell.MultiRNNCell([(tf.contrib.rnn.core_rnn_cell.GRUCell(num_hidden)) for i in range(num_layers)],
+            stack = tf.contrib.rnn.core_rnn_cell.MultiRNNCell([cell] * num_layers,
                                                               state_is_tuple=True)
 
             # The second output is the last state and we will no use that
-            outputs, _ = tf.nn.dynamic_rnn(stack, inputs, seq_len, dtype=tf.float32)
+            outputs, _ = tf.nn.dynamic_rnn(cell, inputs, sequence_length=seq_len, dtype=tf.float32)#seq_len
 
             shape = tf.shape(inputs)
             batch_s, max_timesteps = shape[0], shape[1]
@@ -105,38 +105,6 @@ class CRNNNet(object):
             logits = tf.transpose(logits, (1, 0, 2))
             return logits, inputs, seq_len, W, b
 
-        def BidirectionalLSTM(input,nHidden,nOut,seq_len,scope = "BLSTM"):#bLSTM 测试一
-            # Prepare data shape to match `bidirectional_rnn` function requirements
-            # Current data input shape: (batch_size, n_steps, n_input)
-            # Required shape: 'n_steps' tensors list of shape (batch_size, n_input)
-
-            # Unstack to get a list of 'n_steps' tensors of shape (batch_size, n_input)
-            def fulconn_layer(input_data, output_dim, activation_func=None):
-                input_dim = int(input_data.get_shape()[1])
-                W = tf.Variable(tf.random_normal([input_dim, output_dim]))
-                b = tf.Variable(tf.random_normal([output_dim]))
-                if activation_func:
-                    return activation_func(tf.matmul(input_data, W) + b)
-                else:
-                    return tf.matmul(input_data, W) + b
-
-            with tf.name_scope(scope):
-                with tf.variable_scope('forward'):
-                    lstm_fw_cell = rnn.LSTMCell(nHidden, forget_bias=1.0, state_is_tuple=True)
-                with tf.variable_scope('backward'):
-                    lstm_bw_cell = rnn.LSTMCell(nHidden, forget_bias=1.0, state_is_tuple=True)
-                outputs, states = tf.nn.bidirectional_dynamic_rnn(cell_fw=lstm_fw_cell, cell_bw=lstm_bw_cell,
-                                                                  inputs=input, sequence_length=seq_len,
-                                                                  dtype=tf.float32, scope=scope)
-
-                outputs = tf.concat(outputs, 2)
-
-                outputs = tf.reshape(outputs, [-1, nHidden * 2])
-
-                outputs = fulconn_layer(outputs, nOut)
-                return outputs
-
-                #outputs = tf.reshape(outputs, [64, 28, nOut])#这里要改
 
         def conv2d(inputs,i,batchNormalization = False):
             nOut = self.params.nm[i]
@@ -154,12 +122,7 @@ class CRNNNet(object):
             net = tf.nn.relu(net)
             return net
 
-        if is_test:
-            print("inputs:", inputs.shape)
-            inputs = tf.reshape(inputs, shape=(32, -1, 3))
-            inputs = tf.expand_dims(inputs, 0)
-
-        with tf.variable_scope("RCNN_net"):
+        with tf.variable_scope("RCNN_net",reuse=self.params.reuse):
             net = conv2d(inputs,0)#input batch_size*32*100*3 #net batch_size *32*100*64
             net = slim.max_pool2d(net, [2, 2], scope='pool1')#net batch_size *16*50*64
             print("poll_0 ", net.shape)
@@ -194,8 +157,9 @@ class CRNNNet(object):
             # net =tf.reshape(net,[self.params.batch_size,self.params.seq_length,self.params.nh])
             # net = BidirectionalLSTM(net, self.params.nh, self.params.nclass, seq_len=seq_len, scope="BLSTM_2")  # ？*512*100
             # net = tf.reshape(net, [self.params.batch_size, self.params.seq_length, self.params.nclass])
-            result = BLSTM(net,self.params.nh,2,seq_len,self.params.nclass)
-            return result
+
+            return BLSTM(net,self.params.nh,2,seq_len,self.params.nclass)
+
 
 
     def losses(self, targets,logits, seq_len,
