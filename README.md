@@ -12,6 +12,7 @@ for example:
 
 output:
 label evangelically
+
 识别结果 evangelically
 
 ## Train a new model
